@@ -8,27 +8,51 @@ import (
 	"testing"
 )
 
+// sampleResponse mirrors the /copilot_internal/user shape for tests.
+const sampleResponse = `{
+	"copilot_plan": "pro",
+	"quota_reset_date": "2026-04-01",
+	"quota_snapshots": {
+		"premium_interactions": {
+			"percent_remaining": 85.0,
+			"remaining": 255,
+			"quota_remaining": 255,
+			"unlimited": false,
+			"timestamp_utc": "2026-03-28T18:00:00Z"
+		},
+		"chat": {
+			"percent_remaining": 90.0,
+			"remaining": 900,
+			"quota_remaining": 900,
+			"unlimited": false,
+			"timestamp_utc": "2026-03-28T18:00:00Z"
+		},
+		"completions": {
+			"unlimited": true
+		}
+	}
+}`
+
 func TestFetchUsageSuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/user/copilot/usage" {
+		// Must hit the internal endpoint.
+		if r.URL.Path != "/copilot_internal/user" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-
-		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
-			t.Fatalf("unexpected authorization header: %s", got)
+		// Auth header must use "token" scheme.
+		if got := r.Header.Get("Authorization"); got != "token test-token" {
+			t.Fatalf("unexpected authorization header: %q", got)
+		}
+		// Required headers.
+		if r.Header.Get("Editor-Version") == "" {
+			t.Fatal("missing Editor-Version header")
+		}
+		if r.Header.Get("X-Github-Api-Version") == "" {
+			t.Fatal("missing X-Github-Api-Version header")
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-            "copilot_plan":"pro",
-            "period_start":"2026-03-01T00:00:00Z",
-            "period_end":"2026-04-01T00:00:00Z",
-            "total_premium_requests":42,
-            "premium_requests_limit":300,
-            "total_chat_turns":19,
-            "total_completions":128,
-            "total_acceptance_count":91
-        }`))
+		_, _ = w.Write([]byte(sampleResponse))
 	}))
 	defer server.Close()
 
@@ -41,45 +65,49 @@ func TestFetchUsageSuccess(t *testing.T) {
 
 	report, err := provider.FetchUsage(context.Background())
 	if err != nil {
-		t.Fatalf("FetchUsage() error = %v", err)
+		t.Fatalf("FetchUsage() unexpected error: %v", err)
 	}
 
 	if report.Provider != ProviderName {
-		t.Fatalf("expected provider %q, got %q", ProviderName, report.Provider)
+		t.Fatalf("provider name: want %q, got %q", ProviderName, report.Provider)
 	}
 
+	// Metadata
 	if got := report.Metadata["plan"]; got != "pro" {
-		t.Fatalf("expected plan metadata %q, got %q", "pro", got)
+		t.Fatalf("plan metadata: want %q, got %q", "pro", got)
+	}
+	if got := report.Metadata["quota_reset_date"]; got != "2026-04-01" {
+		t.Fatalf("quota_reset_date metadata: want %q, got %q", "2026-04-01", got)
+	}
+	if got := report.Metadata["endpoint"]; got != "/copilot_internal/user" {
+		t.Fatalf("endpoint metadata: want %q, got %q", "/copilot_internal/user", got)
 	}
 
-	if got := report.Metrics["premium_requests_used"]; got != 42 {
-		t.Fatalf("expected premium_requests_used 42, got %v", got)
+	// Premium snapshot
+	if got := report.Metrics["premium_percent_remaining"]; got != 85.0 {
+		t.Fatalf("premium_percent_remaining: want 85.0, got %v", got)
+	}
+	if got := report.Metrics["premium_remaining"]; got != 255 {
+		t.Fatalf("premium_remaining: want 255, got %v", got)
 	}
 
-	if got := report.Metrics["premium_requests_limit"]; got != 300 {
-		t.Fatalf("expected premium_requests_limit 300, got %v", got)
+	// Chat snapshot
+	if got := report.Metrics["chat_percent_remaining"]; got != 90.0 {
+		t.Fatalf("chat_percent_remaining: want 90.0, got %v", got)
 	}
 
-	if got := report.Metrics["premium_requests_remaining"]; got != 258 {
-		t.Fatalf("expected premium_requests_remaining 258, got %v", got)
+	// Completions are unlimited — sentinel metric present, no percent.
+	if got := report.Metrics["completions_unlimited"]; got != 1 {
+		t.Fatalf("completions_unlimited: want 1, got %v", got)
 	}
-
-	if got := report.Metrics["chat_turns"]; got != 19 {
-		t.Fatalf("expected chat_turns 19, got %v", got)
-	}
-
-	if report.PeriodStart != "2026-03-01T00:00:00Z" {
-		t.Fatalf("unexpected period start: %q", report.PeriodStart)
-	}
-
-	if report.PeriodEnd != "2026-04-01T00:00:00Z" {
-		t.Fatalf("unexpected period end: %q", report.PeriodEnd)
+	if _, found := report.Metrics["completions_percent_remaining"]; found {
+		t.Fatal("completions_percent_remaining should not be set when quota is unlimited")
 	}
 }
 
 func TestFetchUsageHTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, `{"message":"forbidden"}`, http.StatusForbidden)
+		http.Error(w, `{"message":"Unauthorized"}`, http.StatusUnauthorized)
 	}))
 	defer server.Close()
 
@@ -95,7 +123,7 @@ func TestFetchUsageHTTPError(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	if got := err.Error(); got == "" || !containsAll(got, []string{"403", "forbidden"}) {
+	if !containsAll(err.Error(), []string{"401"}) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -103,7 +131,7 @@ func TestFetchUsageHTTPError(t *testing.T) {
 func TestFetchUsageInvalidJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"total_premium_requests":`))
+		_, _ = w.Write([]byte(`{"copilot_plan":`))
 	}))
 	defer server.Close()
 
@@ -116,7 +144,45 @@ func TestFetchUsageInvalidJSON(t *testing.T) {
 
 	_, err := provider.FetchUsage(context.Background())
 	if err == nil {
-		t.Fatal("expected error, got nil")
+		t.Fatal("expected error for invalid JSON, got nil")
+	}
+}
+
+func TestEnvTokenResolverPrefersCopilotToken(t *testing.T) {
+	t.Setenv("GITHUB_COPILOT_TOKEN", "copilot-tok")
+	t.Setenv("GITHUB_TOKEN", "gh-tok")
+
+	got, err := EnvTokenResolver(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "copilot-tok" {
+		t.Fatalf("expected GITHUB_COPILOT_TOKEN to win, got %q", got)
+	}
+}
+
+func TestEnvTokenResolverFallback(t *testing.T) {
+	t.Setenv("GITHUB_COPILOT_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "fallback-tok")
+	t.Setenv("GH_TOKEN", "")
+
+	got, err := EnvTokenResolver(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "fallback-tok" {
+		t.Fatalf("expected GITHUB_TOKEN fallback, got %q", got)
+	}
+}
+
+func TestEnvTokenResolverNoToken(t *testing.T) {
+	t.Setenv("GITHUB_COPILOT_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+
+	_, err := EnvTokenResolver(context.Background())
+	if err == nil {
+		t.Fatal("expected error when no token env vars are set")
 	}
 }
 

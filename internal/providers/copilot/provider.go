@@ -17,7 +17,6 @@ import (
 const (
 	ProviderName   = "github-copilot"
 	defaultBaseURL = "https://api.github.com"
-	apiVersion     = "2022-11-28"
 )
 
 // TokenResolver provides an access token at fetch time.
@@ -30,25 +29,37 @@ type Config struct {
 	TokenResolver TokenResolver
 }
 
-// Provider implements usage.Provider for the GitHub Copilot usage endpoint.
+// Provider implements usage.Provider for the GitHub Copilot internal user endpoint.
 type Provider struct {
 	httpClient    *http.Client
 	baseURL       string
 	tokenResolver TokenResolver
 }
 
-type apiResponse struct {
-	CopilotPlan              string   `json:"copilot_plan"`
-	PeriodStart              string   `json:"period_start"`
-	PeriodEnd                string   `json:"period_end"`
-	TotalPremiumRequests     *float64 `json:"total_premium_requests"`
-	PremiumRequestsLimit     *float64 `json:"premium_requests_limit"`
-	RemainingPremiumRequests *float64 `json:"remaining_premium_requests"`
-	TotalChatTurns           *float64 `json:"total_chat_turns"`
-	TotalCompletions         *float64 `json:"total_completions"`
-	TotalAcceptanceCount     *float64 `json:"total_acceptance_count"`
+// quotaSnapshot represents the per-feature quota data returned by the API.
+type quotaSnapshot struct {
+	PercentRemaining *float64 `json:"percent_remaining"`
+	Remaining        *float64 `json:"remaining"`
+	QuotaRemaining   *float64 `json:"quota_remaining"`
+	Unlimited        *bool    `json:"unlimited"`
+	TimestampUTC     string   `json:"timestamp_utc"`
 }
 
+// quotaSnapshots groups all feature snapshots.
+type quotaSnapshots struct {
+	Chat                *quotaSnapshot `json:"chat"`
+	Completions         *quotaSnapshot `json:"completions"`
+	PremiumInteractions *quotaSnapshot `json:"premium_interactions"`
+}
+
+// apiResponse models the /copilot_internal/user response shape.
+type apiResponse struct {
+	CopilotPlan      string          `json:"copilot_plan"`
+	QuotaResetDate   string          `json:"quota_reset_date"`
+	QuotaSnapshots   *quotaSnapshots `json:"quota_snapshots"`
+}
+
+// NewProvider constructs a Provider with the given Config.
 func NewProvider(cfg Config) *Provider {
 	client := cfg.HTTPClient
 	if client == nil {
@@ -72,49 +83,52 @@ func NewProvider(cfg Config) *Provider {
 	}
 }
 
+// Name returns the canonical provider identifier.
 func (p *Provider) Name() string {
 	return ProviderName
 }
 
+// FetchUsage queries /copilot_internal/user and normalises the response.
 func (p *Provider) FetchUsage(ctx context.Context) (*usage.UsageReport, error) {
 	token, err := p.tokenResolver(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/user/copilot/usage", nil)
+	endpoint := p.baseURL + "/copilot_internal/user"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", apiVersion)
-	req.Header.Set("User-Agent", "ingo/0.1")
+	req.Header.Set("Authorization", "token "+token)
+	req.Header.Set("Editor-Version", "vscode/1.96.2")
+	req.Header.Set("User-Agent", "GitHubCopilotChat/0.26.7")
+	req.Header.Set("X-Github-Api-Version", "2025-04-01")
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetch GitHub Copilot usage: %w", err)
+		return nil, fmt.Errorf("fetch Copilot usage: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read GitHub Copilot usage response: %w", err)
+		return nil, fmt.Errorf("read Copilot usage response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		hint := ""
-		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
-			hint = " (check that the token has the copilot scope and that the endpoint is enabled for this account)"
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			hint = " (check that GITHUB_COPILOT_TOKEN is valid)"
 		}
-
-		return nil, fmt.Errorf("GitHub Copilot usage API returned %s%s: %s", resp.Status, hint, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("Copilot API returned %s%s: %s",
+			resp.Status, hint, strings.TrimSpace(string(body)))
 	}
 
 	var payload apiResponse
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, fmt.Errorf("decode GitHub Copilot usage response: %w", err)
+		return nil, fmt.Errorf("decode Copilot response: %w", err)
 	}
 
 	report := &usage.UsageReport{
@@ -122,60 +136,58 @@ func (p *Provider) FetchUsage(ctx context.Context) (*usage.UsageReport, error) {
 		RetrievedAt: time.Now().UTC().Format(time.RFC3339),
 		Metrics:     make(map[string]float64),
 		Metadata: map[string]string{
-			"endpoint": "/user/copilot/usage",
+			"endpoint": "/copilot_internal/user",
 		},
 	}
 
 	if payload.CopilotPlan != "" {
 		report.Metadata["plan"] = payload.CopilotPlan
 	}
-
-	if payload.PeriodStart != "" {
-		periodStart, err := time.Parse(time.RFC3339, payload.PeriodStart)
-		if err != nil {
-			return nil, fmt.Errorf("parse period_start: %w", err)
-		}
-		report.PeriodStart = periodStart.UTC().Format(time.RFC3339)
+	if payload.QuotaResetDate != "" {
+		report.Metadata["quota_reset_date"] = payload.QuotaResetDate
 	}
 
-	if payload.PeriodEnd != "" {
-		periodEnd, err := time.Parse(time.RFC3339, payload.PeriodEnd)
-		if err != nil {
-			return nil, fmt.Errorf("parse period_end: %w", err)
-		}
-		report.PeriodEnd = periodEnd.UTC().Format(time.RFC3339)
-	}
-
-	addMetric(report.Metrics, "premium_requests_used", payload.TotalPremiumRequests)
-	addMetric(report.Metrics, "premium_requests_limit", payload.PremiumRequestsLimit)
-	addMetric(report.Metrics, "premium_requests_remaining", payload.RemainingPremiumRequests)
-	addMetric(report.Metrics, "chat_turns", payload.TotalChatTurns)
-	addMetric(report.Metrics, "completions", payload.TotalCompletions)
-	addMetric(report.Metrics, "acceptances", payload.TotalAcceptanceCount)
-
-	if _, hasRemaining := report.Metrics["premium_requests_remaining"]; !hasRemaining {
-		used, hasUsed := report.Metrics["premium_requests_used"]
-		limit, hasLimit := report.Metrics["premium_requests_limit"]
-		if hasUsed && hasLimit {
-			report.Metrics["premium_requests_remaining"] = limit - used
-		}
+	if qs := payload.QuotaSnapshots; qs != nil {
+		applySnapshot(report, "premium", qs.PremiumInteractions)
+		applySnapshot(report, "chat", qs.Chat)
+		applySnapshot(report, "completions", qs.Completions)
 	}
 
 	return report, nil
 }
 
+// applySnapshot writes a quota snapshot's fields into the report using a
+// consistent key prefix, e.g. "premium_percent_remaining".
+// If the quota is unlimited, a sentinel metric of 1 is written for
+// "<prefix>_unlimited" and the percentage metrics are omitted.
+func applySnapshot(report *usage.UsageReport, prefix string, snap *quotaSnapshot) {
+	if snap == nil {
+		return
+	}
+	if snap.Unlimited != nil && *snap.Unlimited {
+		report.Metrics[prefix+"_unlimited"] = 1
+		return
+	}
+	addMetricF(report.Metrics, prefix+"_percent_remaining", snap.PercentRemaining)
+	addMetricF(report.Metrics, prefix+"_remaining", snap.Remaining)
+	addMetricF(report.Metrics, prefix+"_quota_remaining", snap.QuotaRemaining)
+}
+
+// EnvTokenResolver resolves a GitHub Copilot token from the environment.
+// Preference order: GITHUB_COPILOT_TOKEN > GITHUB_TOKEN > GH_TOKEN.
 func EnvTokenResolver(_ context.Context) (string, error) {
-	for _, envVar := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
+	for _, envVar := range []string{"GITHUB_COPILOT_TOKEN", "GITHUB_TOKEN", "GH_TOKEN"} {
 		token := strings.TrimSpace(os.Getenv(envVar))
 		if token != "" {
 			return token, nil
 		}
 	}
-
-	return "", errors.New("missing GitHub token: set GITHUB_TOKEN or GH_TOKEN with the copilot scope")
+	return "", errors.New(
+		"missing token: set GITHUB_COPILOT_TOKEN (preferred), GITHUB_TOKEN, or GH_TOKEN",
+	)
 }
 
-func addMetric(metrics map[string]float64, key string, value *float64) {
+func addMetricF(metrics map[string]float64, key string, value *float64) {
 	if value != nil {
 		metrics[key] = *value
 	}
