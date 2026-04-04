@@ -11,18 +11,21 @@ This first slice keeps things intentionally small:
 
 ## GitHub Copilot adapter
 
-The Copilot adapter calls `GET https://api.github.com/user/copilot/usage` and normalizes the response into a shared `UsageReport` shape.
+The Copilot adapter calls `GET https://api.github.com/copilot_internal/user` and normalizes the response into a shared `UsageReport` shape.
 
-It expects a GitHub token with the `copilot` scope in one of these environment variables:
+Auth resolution is generic and machine-portable:
 - `GITHUB_TOKEN`
 - `GH_TOKEN`
+- fallback to `gh auth token` when the GitHub CLI is installed and logged in
 
-If the token does not have the right scope, GitHub will typically answer with `403` or `404` and the adapter surfaces that response back to the caller.
+If the token does not have the right access, or the account is not Copilot-enabled, GitHub will typically answer with `401`, `403`, or `404` and the adapter surfaces that response back to the caller.
 
 ## Run the CLI
 
 ```bash
-export GITHUB_TOKEN=YOUR_TOKEN_WITH_COPILOT_SCOPE
+export GITHUB_TOKEN=YOUR_GITHUB_TOKEN
+# or: gh auth login
+
 go run ./cmd/ingo usage github-copilot
 ```
 

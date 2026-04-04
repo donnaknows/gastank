@@ -148,41 +148,79 @@ func TestFetchUsageInvalidJSON(t *testing.T) {
 	}
 }
 
-func TestEnvTokenResolverPrefersCopilotToken(t *testing.T) {
-	t.Setenv("GITHUB_COPILOT_TOKEN", "copilot-tok")
-	t.Setenv("GITHUB_TOKEN", "gh-tok")
+func TestEnvTokenResolverPrefersGHTokenEnv(t *testing.T) {
+	original := runCommandContext
+	defer func() { runCommandContext = original }()
+	runCommandContext = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return []byte("cli-token\n"), nil
+	}
+
+	t.Setenv("GITHUB_TOKEN", "env-token")
+	t.Setenv("GH_TOKEN", "gh-token")
 
 	got, err := EnvTokenResolver(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "copilot-tok" {
-		t.Fatalf("expected GITHUB_COPILOT_TOKEN to win, got %q", got)
+	if got != "env-token" {
+		t.Fatalf("expected GITHUB_TOKEN to win, got %q", got)
 	}
 }
 
-func TestEnvTokenResolverFallback(t *testing.T) {
-	t.Setenv("GITHUB_COPILOT_TOKEN", "")
-	t.Setenv("GITHUB_TOKEN", "fallback-tok")
-	t.Setenv("GH_TOKEN", "")
+func TestEnvTokenResolverFallbackToGHEnv(t *testing.T) {
+	original := runCommandContext
+	defer func() { runCommandContext = original }()
+	runCommandContext = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return []byte("cli-token\n"), nil
+	}
+
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "fallback-tok")
 
 	got, err := EnvTokenResolver(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got != "fallback-tok" {
-		t.Fatalf("expected GITHUB_TOKEN fallback, got %q", got)
+		t.Fatalf("expected GH_TOKEN fallback, got %q", got)
+	}
+}
+
+func TestEnvTokenResolverFallbackToGhCLI(t *testing.T) {
+	original := runCommandContext
+	defer func() { runCommandContext = original }()
+	runCommandContext = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name != "gh" {
+			t.Fatalf("unexpected command: %s", name)
+		}
+		return []byte("cli-token\n"), nil
+	}
+
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+
+	got, err := EnvTokenResolver(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "cli-token" {
+		t.Fatalf("expected gh CLI token fallback, got %q", got)
 	}
 }
 
 func TestEnvTokenResolverNoToken(t *testing.T) {
-	t.Setenv("GITHUB_COPILOT_TOKEN", "")
+	original := runCommandContext
+	defer func() { runCommandContext = original }()
+	runCommandContext = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return nil, context.DeadlineExceeded
+	}
+
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GH_TOKEN", "")
 
 	_, err := EnvTokenResolver(context.Background())
 	if err == nil {
-		t.Fatal("expected error when no token env vars are set")
+		t.Fatal("expected error when no auth sources are available")
 	}
 }
 

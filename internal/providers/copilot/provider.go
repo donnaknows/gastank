@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -120,7 +121,10 @@ func (p *Provider) FetchUsage(ctx context.Context) (*usage.UsageReport, error) {
 	if resp.StatusCode != http.StatusOK {
 		hint := ""
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			hint = " (check that GITHUB_COPILOT_TOKEN is valid)"
+			hint = " (check that your GitHub token is valid or that gh auth is logged in)"
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			hint = " (check that the account has Copilot access and that the internal endpoint is still available)"
 		}
 		return nil, fmt.Errorf("Copilot API returned %s%s: %s",
 			resp.Status, hint, strings.TrimSpace(string(body)))
@@ -173,17 +177,28 @@ func applySnapshot(report *usage.UsageReport, prefix string, snap *quotaSnapshot
 	addMetricF(report.Metrics, prefix+"_quota_remaining", snap.QuotaRemaining)
 }
 
-// EnvTokenResolver resolves a GitHub Copilot token from the environment.
-// Preference order: GITHUB_COPILOT_TOKEN > GITHUB_TOKEN > GH_TOKEN.
-func EnvTokenResolver(_ context.Context) (string, error) {
-	for _, envVar := range []string{"GITHUB_COPILOT_TOKEN", "GITHUB_TOKEN", "GH_TOKEN"} {
+var runCommandContext = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).Output()
+}
+
+// EnvTokenResolver resolves generic GitHub auth for the Copilot usage endpoint.
+// Preference order: GITHUB_TOKEN > GH_TOKEN > `gh auth token`.
+func EnvTokenResolver(ctx context.Context) (string, error) {
+	for _, envVar := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
 		token := strings.TrimSpace(os.Getenv(envVar))
 		if token != "" {
 			return token, nil
 		}
 	}
+
+	if out, err := runCommandContext(ctx, "gh", "auth", "token"); err == nil {
+		if token := strings.TrimSpace(string(out)); token != "" {
+			return token, nil
+		}
+	}
+
 	return "", errors.New(
-		"missing token: set GITHUB_COPILOT_TOKEN (preferred), GITHUB_TOKEN, or GH_TOKEN",
+		"missing GitHub auth: set GITHUB_TOKEN or GH_TOKEN, or run `gh auth login`",
 	)
 }
 
