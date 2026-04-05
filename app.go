@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"log"
 
 	"ingo/internal/auth"
 	githubauth "ingo/internal/auth/github"
@@ -30,6 +31,7 @@ type AuthStatus struct {
 type App struct {
 	ctx          context.Context
 	credStore    *auth.Store
+	credsPath    string // path to the on-disk credentials file
 	usageService *usage.Service
 	deviceFlow   *githubauth.DeviceFlow
 }
@@ -37,8 +39,19 @@ type App struct {
 // NewApp creates a new App application struct.
 func NewApp() *App {
 	store := auth.NewStore()
+
+	credsPath, err := auth.DefaultCredentialsPath()
+	if err != nil {
+		log.Printf("ingo: could not resolve credentials path: %v", err)
+	} else {
+		if err := store.Load(credsPath); err != nil {
+			log.Printf("ingo: could not load credentials: %v", err)
+		}
+	}
+
 	return &App{
 		credStore: store,
+		credsPath: credsPath,
 		usageService: usage.NewService(
 			copilot.NewProvider(copilot.Config{CredStore: store}),
 		),
@@ -46,10 +59,21 @@ func NewApp() *App {
 	}
 }
 
-// startup is called when the app starts. The context is saved
-// so we can call runtime methods.
+// startup is called when the app starts. The context is saved so we can call
+// runtime methods.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+}
+
+// save persists the credential store to disk. Failures are logged but not
+// returned to the caller — a save error should never break the in-memory flow.
+func (a *App) save() {
+	if a.credsPath == "" {
+		return
+	}
+	if err := a.credStore.Save(a.credsPath); err != nil {
+		log.Printf("ingo: could not save credentials: %v", err)
+	}
 }
 
 // --- Auth methods (Wails-callable) ---
@@ -60,8 +84,8 @@ func (a *App) GetAuthStatus() AuthStatus {
 	if ok && cred.Valid() {
 		return AuthStatus{Authenticated: true, Source: string(cred.Source)}
 	}
-	// Also accept env-var tokens as "authenticated" so the UI doesn't
-	// prompt for device flow when a token is already available via env.
+	// Also accept env-var tokens as "authenticated" so the UI doesn't prompt
+	// for device flow when a token is already available via env.
 	ctx := a.ctx
 	if ctx == nil {
 		ctx = context.Background()
@@ -73,8 +97,8 @@ func (a *App) GetAuthStatus() AuthStatus {
 }
 
 // StartGitHubLogin begins the OAuth device flow and returns the user-facing
-// code and URL. The caller should display these to the user, then call
-// PollGitHubLogin with the returned DeviceCode.
+// code and URL. The caller should display these to the user, then poll with
+// PollGitHubLogin.
 func (a *App) StartGitHubLogin() (*DeviceFlowState, error) {
 	ctx := a.ctx
 	if ctx == nil {
@@ -94,9 +118,8 @@ func (a *App) StartGitHubLogin() (*DeviceFlowState, error) {
 }
 
 // PollGitHubLogin polls the token endpoint once. Returns true when the user
-// has approved, false when still pending (ErrAuthorizationPending /
-// ErrSlowDown), and an error on fatal states (expired, denied, network error).
-// The frontend is responsible for the polling interval.
+// has approved (credential is stored and persisted), false when still pending,
+// and an error on fatal states (expired, denied, network error).
 func (a *App) PollGitHubLogin(deviceCode string) (bool, error) {
 	ctx := a.ctx
 	if ctx == nil {
@@ -111,12 +134,14 @@ func (a *App) PollGitHubLogin(deviceCode string) (bool, error) {
 		return false, err
 	}
 	a.credStore.Set(copilot.ProviderName, cred)
+	a.save()
 	return true, nil
 }
 
-// LogOut clears the stored credential for the Copilot provider.
+// LogOut clears the stored credential for the Copilot provider and persists.
 func (a *App) LogOut() {
 	a.credStore.Clear(copilot.ProviderName)
+	a.save()
 }
 
 // --- Usage methods (Wails-callable) ---

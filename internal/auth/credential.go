@@ -3,6 +3,10 @@
 package auth
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -17,9 +21,9 @@ const (
 
 // Credential holds a token and its provenance.
 type Credential struct {
-	Token     string
-	Source    Source
-	ExpiresAt time.Time // zero means no expiry
+	Token     string    `json:"token"`
+	Source    Source    `json:"source"`
+	ExpiresAt time.Time `json:"expiresAt,omitempty"` // zero means no expiry
 }
 
 // Valid reports whether the credential has a non-empty token and has not expired.
@@ -33,8 +37,8 @@ func (c Credential) Valid() bool {
 	return true
 }
 
-// Store is a thread-safe in-memory registry of credentials keyed by
-// a provider ID (e.g. "github-copilot").
+// Store is a thread-safe credential registry keyed by provider ID.
+// It can optionally persist to a JSON file via Load/Save.
 type Store struct {
 	mu    sync.RWMutex
 	creds map[string]Credential
@@ -65,4 +69,71 @@ func (s *Store) Clear(providerKey string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.creds, providerKey)
+}
+
+// Load reads credentials from a JSON file into the store.
+// If the file does not exist the call is a no-op (not an error).
+func (s *Store) Load(path string) error {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read credentials file: %w", err)
+	}
+
+	var persisted map[string]Credential
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		// Corrupt file — treat as empty rather than hard-failing.
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, v := range persisted {
+		if v.Valid() {
+			s.creds[k] = v
+		}
+	}
+	return nil
+}
+
+// Save writes the current credentials to a JSON file, creating parent
+// directories as needed.
+func (s *Store) Save(path string) error {
+	s.mu.RLock()
+	// Copy to avoid holding the lock during I/O.
+	snapshot := make(map[string]Credential, len(s.creds))
+	for k, v := range s.creds {
+		snapshot[k] = v
+	}
+	s.mu.RUnlock()
+
+	data, err := json.MarshalIndent(snapshot, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal credentials: %w", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create credentials directory: %w", err)
+	}
+	// Write to a temp file then rename for atomicity.
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return fmt.Errorf("write credentials file: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("rename credentials file: %w", err)
+	}
+	return nil
+}
+
+// DefaultCredentialsPath returns the platform-appropriate path for the
+// credentials file: <os.UserConfigDir>/ingo/credentials.json.
+func DefaultCredentialsPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("locate user config directory: %w", err)
+	}
+	return filepath.Join(dir, "ingo", "credentials.json"), nil
 }
