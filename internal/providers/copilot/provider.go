@@ -37,6 +37,7 @@ type Provider struct {
 	httpClient    *http.Client
 	baseURL       string
 	tokenResolver TokenResolver
+	credStore     *auth.Store // optional: clear on 401 to trigger re-auth
 }
 
 // quotaSnapshot represents the per-feature quota data returned by the API.
@@ -87,6 +88,7 @@ func NewProvider(cfg Config) *Provider {
 		httpClient:    client,
 		baseURL:       strings.TrimRight(baseURL, "/"),
 		tokenResolver: resolver,
+		credStore:     cfg.CredStore,
 	}
 }
 
@@ -108,6 +110,12 @@ func (p *Provider) FetchUsage(ctx context.Context) (*usage.UsageReport, error) {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 
+	// NOTE: These headers impersonate VS Code / GitHub Copilot Chat to access
+	// the /copilot_internal/* endpoint. GitHub may gate this endpoint on specific
+	// editor-version strings. If requests start returning 403 or 404 unexpectedly,
+	// check whether GitHub has tightened the version gate and update these values.
+	// The correct long-term fix is to use the officially documented API once one
+	// is available for per-user quota data.
 	req.Header.Set("Authorization", "token "+token)
 	req.Header.Set("Editor-Version", "vscode/1.96.2")
 	req.Header.Set("User-Agent", "GitHubCopilotChat/0.26.7")
@@ -125,10 +133,15 @@ func (p *Provider) FetchUsage(ctx context.Context) (*usage.UsageReport, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		hint := ""
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			hint = " (token may be invalid or expired — try logging in again)"
+			// Clear the stored credential so the next call forces re-auth.
+			if p.credStore != nil {
+				p.credStore.Clear(ProviderName)
+			}
+			return nil, fmt.Errorf("Copilot API returned %s (token invalid or revoked — log in again): %s",
+				resp.Status, strings.TrimSpace(string(body)))
 		}
+		hint := ""
 		if resp.StatusCode == http.StatusNotFound {
 			hint = " (check that the account has Copilot access)"
 		}

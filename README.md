@@ -13,18 +13,20 @@ This first slice keeps things intentionally small:
 
 The Copilot adapter calls `GET https://api.github.com/copilot_internal/user` and normalizes the response into a shared `UsageReport` shape.
 
-Auth resolution is generic and machine-portable:
-- `GITHUB_TOKEN`
-- `GH_TOKEN`
-- fallback to `gh auth token` when the GitHub CLI is installed and logged in
+Auth resolution order (env vars only — no `gh` CLI dependency):
+1. `GITHUB_COPILOT_TOKEN` (highest priority)
+2. `GITHUB_TOKEN`
+3. `GH_TOKEN`
+
+For interactive use, the app exposes a GitHub device-flow login that stores the resulting credential at `<os.UserConfigDir>/ingo/credentials.json`.
 
 If the token does not have the right access, or the account is not Copilot-enabled, GitHub will typically answer with `401`, `403`, or `404` and the adapter surfaces that response back to the caller.
 
 ## Run the CLI
 
 ```bash
-export GITHUB_TOKEN=YOUR_GITHUB_TOKEN
-# or: gh auth login
+export GITHUB_COPILOT_TOKEN=YOUR_TOKEN
+# or: GITHUB_TOKEN / GH_TOKEN are also accepted
 
 go run ./cmd/ingo usage github-copilot
 ```

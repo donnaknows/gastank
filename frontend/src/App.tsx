@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
 import {
   GetAuthStatus,
@@ -37,6 +37,10 @@ function pct(value: number | undefined): string {
   return `${Math.round(value)}%`;
 }
 
+function isAuthError(msg: string): boolean {
+  return /401|403|unauthorized|forbidden|token.*invalid|invalid.*token|not authenticated|log.*in/i.test(msg);
+}
+
 function MetricRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="metric-row">
@@ -48,11 +52,27 @@ function MetricRow({ label, value }: { label: string; value: string }) {
 
 // ---- Login screen ----
 
-function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
+function LoginScreen({
+  onLoggedIn,
+  sessionExpired,
+}: {
+  onLoggedIn: () => void;
+  sessionExpired: boolean;
+}) {
   const [flow, setFlow] = useState<DeviceFlowState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [polling, setPolling] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Clean up polling timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, []);
 
   async function startLogin() {
     setStarting(true);
@@ -73,16 +93,18 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     // interval from GitHub + a small buffer (ms)
     const intervalMs = Math.max((state.interval + 1) * 1000, 6000);
 
-    const timer = setInterval(async () => {
+    timerRef.current = setInterval(async () => {
       try {
         const done = await PollGitHubLogin(state.deviceCode);
         if (done) {
-          clearInterval(timer);
+          if (timerRef.current !== null) clearInterval(timerRef.current);
+          timerRef.current = null;
           setPolling(false);
           onLoggedIn();
         }
       } catch (e: unknown) {
-        clearInterval(timer);
+        if (timerRef.current !== null) clearInterval(timerRef.current);
+        timerRef.current = null;
         setPolling(false);
         setFlow(null);
         setError(String(e));
@@ -93,6 +115,9 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   return (
     <div className="login-screen">
       <h2 className="login-title">Connect GitHub Copilot</h2>
+      {sessionExpired && (
+        <p className="session-expired">Session expired — please sign in again.</p>
+      )}
       <p className="login-body">
         Sign in with your GitHub account to view Copilot usage.
       </p>
@@ -124,7 +149,13 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
 
 // ---- Usage screen ----
 
-function UsageScreen({ onLogOut }: { onLogOut: () => void }) {
+function UsageScreen({
+  onLogOut,
+  onAuthError,
+}: {
+  onLogOut: () => void;
+  onAuthError: () => void;
+}) {
   const [report, setReport] = useState<UsageReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -136,11 +167,18 @@ function UsageScreen({ onLogOut }: { onLogOut: () => void }) {
       const r = await GetCopilotUsage();
       setReport(r);
     } catch (e: unknown) {
-      setError(String(e));
+      const msg = String(e);
+      if (isAuthError(msg)) {
+        // Token invalid/expired — clear and send back to login.
+        await LogOut();
+        onAuthError();
+        return;
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [onAuthError]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -206,6 +244,7 @@ type Screen = 'loading' | 'login' | 'usage';
 
 function App() {
   const [screen, setScreen] = useState<Screen>('loading');
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   useEffect(() => {
     GetAuthStatus().then((status: AuthStatus) => {
@@ -215,6 +254,12 @@ function App() {
 
   function handleLogOut() {
     LogOut();
+    setSessionExpired(false);
+    setScreen('login');
+  }
+
+  function handleAuthError() {
+    setSessionExpired(true);
     setScreen('login');
   }
 
@@ -226,8 +271,15 @@ function App() {
       </header>
 
       {screen === 'loading' && <p className="status-text">Loading…</p>}
-      {screen === 'login' && <LoginScreen onLoggedIn={() => setScreen('usage')} />}
-      {screen === 'usage' && <UsageScreen onLogOut={handleLogOut} />}
+      {screen === 'login' && (
+        <LoginScreen
+          onLoggedIn={() => { setSessionExpired(false); setScreen('usage'); }}
+          sessionExpired={sessionExpired}
+        />
+      )}
+      {screen === 'usage' && (
+        <UsageScreen onLogOut={handleLogOut} onAuthError={handleAuthError} />
+      )}
     </div>
   );
 }

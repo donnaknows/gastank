@@ -2,10 +2,10 @@ package github
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"ingo/internal/auth"
@@ -147,23 +147,15 @@ type rewriteTransport struct {
 
 func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	cloned := req.Clone(req.Context())
-	parsed, _ := parseURL(rt.target)
+	parsed, err := parseURL(rt.target)
+	if err != nil {
+		return nil, err
+	}
 	cloned.URL.Scheme = parsed.Scheme
 	cloned.URL.Host = parsed.Host
 	return rt.base.RoundTrip(cloned)
 }
 
-func parseURL(raw string) (struct{ Scheme, Host string }, error) {
-	var tmp struct {
-		Scheme, Host string
-	}
-	// simple manual parse — avoids importing net/url just for a test helper
-	data, err := json.Marshal(map[string]string{"url": raw})
-	_ = data
-	_ = err
-	// actually use net/url through the standard library
-	req, _ := http.NewRequest(http.MethodGet, raw, nil)
-	tmp.Scheme = req.URL.Scheme
-	tmp.Host = req.URL.Host
-	return tmp, nil
+func parseURL(raw string) (*url.URL, error) {
+	return url.Parse(raw)
 }

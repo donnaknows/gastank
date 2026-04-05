@@ -152,6 +152,17 @@ body {
   text-align: center;
 }
 
+.session-expired {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--danger-text);
+  text-align: center;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  background: var(--error-bg);
+}
+
 /* ----- Usage card ----- */
 
 .usage-card {

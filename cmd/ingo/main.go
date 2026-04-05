@@ -4,16 +4,29 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
+	"ingo/internal/auth"
 	"ingo/internal/providers/copilot"
 	"ingo/internal/usage"
 )
 
 func main() {
+	store := auth.NewStore()
+
+	credsPath, err := auth.DefaultCredentialsPath()
+	if err != nil {
+		log.Printf("ingo: could not resolve credentials path: %v", err)
+	} else {
+		if err := store.Load(credsPath); err != nil {
+			log.Printf("ingo: could not load credentials: %v", err)
+		}
+	}
+
 	service := usage.NewService(
-		copilot.NewProvider(copilot.Config{}),
+		copilot.NewProvider(copilot.Config{CredStore: store}),
 	)
 
 	if len(os.Args) < 2 || os.Args[1] != "usage" {

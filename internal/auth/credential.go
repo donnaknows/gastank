@@ -5,6 +5,7 @@ package auth
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -84,7 +85,8 @@ func (s *Store) Load(path string) error {
 
 	var persisted map[string]Credential
 	if err := json.Unmarshal(data, &persisted); err != nil {
-		// Corrupt file — treat as empty rather than hard-failing.
+		// Corrupt file — log and treat as empty rather than hard-failing.
+		log.Printf("ingo: credentials file %s is corrupt and will be ignored: %v", path, err)
 		return nil
 	}
 
