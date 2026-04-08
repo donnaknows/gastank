@@ -159,6 +159,7 @@ function UsageScreen({
   const [report, setReport] = useState<UsageReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showDetails, setShowDetails] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -211,15 +212,30 @@ function UsageScreen({
                 label="Premium interactions remaining"
                 value={m['premium_unlimited'] === 1 ? 'Unlimited' : pct(m['premium_percent_remaining'])}
               />
-              <MetricRow
-                label="Chat remaining"
-                value={m['chat_unlimited'] === 1 ? 'Unlimited' : pct(m['chat_percent_remaining'])}
-              />
-              <MetricRow
-                label="Completions remaining"
-                value={m['completions_unlimited'] === 1 ? 'Unlimited' : pct(m['completions_percent_remaining'])}
-              />
             </div>
+
+            <button
+              type="button"
+              className="details-toggle"
+              onClick={() => setShowDetails(prev => !prev)}
+              aria-expanded={showDetails}
+              aria-controls="details-metrics"
+            >
+              {showDetails ? 'Hide details ▴' : 'Show details ▾'}
+            </button>
+
+            {showDetails && (
+              <div id="details-metrics" className="metrics details-metrics">
+                <MetricRow
+                  label="Chat remaining"
+                  value={m['chat_unlimited'] === 1 ? 'Unlimited' : pct(m['chat_percent_remaining'])}
+                />
+                <MetricRow
+                  label="Completions remaining"
+                  value={m['completions_unlimited'] === 1 ? 'Unlimited' : pct(m['completions_percent_remaining'])}
+                />
+              </div>
+            )}
 
             <p className="retrieved-at">
               Updated {new Date(report.retrievedAt).toLocaleTimeString()}
