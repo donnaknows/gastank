@@ -34,6 +34,16 @@ Downloads and runs the NSIS installer.
 
 Grab the latest release from [GitHub Releases](https://github.com/donnaknows/gastank/releases).
 
+## Releases
+
+Releases are managed with [`googleapis/release-please-action`](https://github.com/googleapis/release-please-action).
+
+- Conventional commits on `main` update a Release PR
+- Merging that Release PR creates the version tag and GitHub release
+- The same workflow then builds and uploads macOS, Windows, and Linux artifacts
+
+No manual tagging is required in the normal flow.
+
 ## Authentication
 
 Gastank authenticates via the GitHub OAuth device flow — no environment variables or external CLI required.

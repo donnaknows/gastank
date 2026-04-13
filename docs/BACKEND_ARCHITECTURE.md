@@ -150,11 +150,11 @@ go run . --version  # check version
 
 Runs on push/PR to main: `go test ./...` + `npm run build` (frontend).
 
-### Release (`release.yml` + `release-please.yml`)
+### Release (`release-please.yml`)
 
-**Automatic versioning**: `release-please` watches conventional commits on `main` and creates a "Release PR" with the correct semver bump and auto-generated CHANGELOG. When you merge that PR, it creates a `v*` tag.
+**Automatic versioning**: `release-please` watches conventional commits on `main` and maintains a Release PR with the correct semver bump and auto-generated CHANGELOG.
 
-**Build pipeline**: Triggered by the `v*` tag. Builds on all three platforms in parallel, then publishes a GitHub Release with auto-generated release notes.
+**Publish pipeline**: When that Release PR is merged, `release-please` creates the tag and GitHub release. The same workflow then builds macOS, Windows, and Linux artifacts and uploads them to that release.
 
 **Artifacts produced:**
 - macOS: `gastank-macos-universal.zip` (universal arm64+amd64 .app bundle)
