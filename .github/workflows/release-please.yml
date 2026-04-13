@@ -1,0 +1,223 @@
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+env:
+  WAILS_VERSION: v3.0.0-alpha.74
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up Task
+        uses: arduino/setup-task@v2
+
+      - name: Install Wails CLI
+        shell: bash
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Stamp release version
+        shell: bash
+        run: ./scripts/set-release-version.sh "${{ needs.release-please.outputs.tag_name }}"
+
+      - name: Build universal app bundle
+        shell: bash
+        run: task darwin:package:universal VERSION=${{ needs.release-please.outputs.version }}
+
+      - name: Archive app bundle
+        shell: bash
+        run: ditto -c -k --sequesterRsrc --keepParent "bin/gastank.app" "bin/gastank-macos-universal.zip"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: |
+            bin/gastank.app
+            bin/gastank-macos-universal.zip
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up Task
+        uses: arduino/setup-task@v2
+
+      - name: Install Wails CLI
+        shell: pwsh
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@${env:WAILS_VERSION}
+          Add-Content -Path $env:GITHUB_PATH -Value "$(go env GOPATH)\bin"
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis --no-progress -y
+
+      - name: Stamp release version
+        shell: bash
+        run: ./scripts/set-release-version.sh "${{ needs.release-please.outputs.tag_name }}"
+
+      - name: Build installer
+        shell: bash
+        run: task windows:package VERSION=${{ needs.release-please.outputs.version }}
+
+      - name: Normalize installer name
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path bin -Filter "*-installer.exe" | Select-Object -First 1
+          if (-not $installer) {
+            throw "Windows installer not found in bin/"
+          }
+          Move-Item $installer.FullName "bin/gastank-windows-amd64-installer.exe" -Force
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: |
+            bin/gastank.exe
+            bin/gastank-windows-amd64-installer.exe
+
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up Task
+        uses: arduino/setup-task@v2
+
+      - name: Install Wails CLI
+        shell: bash
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev rpm
+          sudo mkdir -p /usr/local/lib/pkgconfig
+          sudo cp build/linux/pkgconfig/*.pc /usr/local/lib/pkgconfig/
+          echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Stamp release version
+        shell: bash
+        run: ./scripts/set-release-version.sh "${{ needs.release-please.outputs.tag_name }}"
+
+      - name: Build Linux packages
+        shell: bash
+        run: task linux:package VERSION=${{ needs.release-please.outputs.version }}
+
+      - name: Normalize Linux binary name
+        run: mv bin/gastank bin/gastank-linux-amd64
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: |
+            bin/gastank-linux-amd64
+            bin/*.AppImage
+            bin/*.deb
+            bin/*.rpm
+            bin/*.pkg.tar.zst
+
+  publish:
+    name: Publish release artifacts
+    runs-on: ubuntu-latest
+    needs:
+      - release-please
+      - build-macos
+      - build-windows
+      - build-linux
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    steps:
+      - name: Download workflow artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Upload artifacts to GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ needs.release-please.outputs.tag_name }} dist/release-macos/*.zip dist/release-windows/*.exe dist/release-linux/* --clobber

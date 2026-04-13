@@ -22,20 +22,6 @@ export class UsageReport {
              */
             this["provider"] = "";
         }
-        if (/** @type {any} */(false)) {
-            /**
-             * @member
-             * @type {string | undefined}
-             */
-            this["periodStart"] = undefined;
-        }
-        if (/** @type {any} */(false)) {
-            /**
-             * @member
-             * @type {string | undefined}
-             */
-            this["periodEnd"] = undefined;
-        }
         if (!("retrievedAt" in $$source)) {
             /**
              * @member
@@ -67,14 +53,14 @@ export class UsageReport {
      * @returns {UsageReport}
      */
     static createFrom($$source = {}) {
-        const $$createField4_0 = $$createType0;
-        const $$createField5_0 = $$createType1;
+        const $$createField2_0 = $$createType0;
+        const $$createField3_0 = $$createType1;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("metrics" in $$parsedSource) {
-            $$parsedSource["metrics"] = $$createField4_0($$parsedSource["metrics"]);
+            $$parsedSource["metrics"] = $$createField2_0($$parsedSource["metrics"]);
         }
         if ("metadata" in $$parsedSource) {
-            $$parsedSource["metadata"] = $$createField5_0($$parsedSource["metadata"]);
+            $$parsedSource["metadata"] = $$createField3_0($$parsedSource["metadata"]);
         }
         return new UsageReport(/** @type {Partial<UsageReport>} */($$parsedSource));
     }
