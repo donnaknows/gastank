@@ -2,12 +2,37 @@
 
 Gastank is a cross-platform desktop tray app for tracking AI token usage across providers, built with Wails v3 + React.
 
-This first slice keeps things intentionally small:
-- Wails v3 Go + React scaffold with native system tray
-- GitHub Copilot provider adapter at `internal/providers/copilot`
-- Shared usage service + provider interface for future adapters
-- Wails backend bindings via `App.GetUsage`, `App.GetCopilotUsage`, and `App.ListProviders`
-- Simple CLI entry point at `cmd/gastank`
+- Native system tray app (macOS, Windows, Linux)
+- GitHub Copilot usage tracking with auto-refresh
+- Built-in CLI for terminal use (`gastank usage`)
+- OAuth device flow authentication (no env vars needed)
+
+## Install
+
+### macOS / Linux
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/donnaknows/gastank/main/scripts/install.sh | bash
+```
+
+**macOS**: Installs `gastank.app` to `/Applications`. Since the app is not notarized, you may need to run:
+```bash
+xattr -cr /Applications/gastank.app
+```
+
+**Linux**: Installs an AppImage to `~/.local/bin/gastank-app`.
+
+### Windows
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/donnaknows/gastank/main/scripts/install.ps1 | iex
+```
+
+Downloads and runs the NSIS installer.
+
+### Manual download
+
+Grab the latest release from [GitHub Releases](https://github.com/donnaknows/gastank/releases).
 
 ## Authentication
 
@@ -23,43 +48,38 @@ Credentials are shared between the GUI and CLI — once logged in via the app, t
 
 If the token does not have the right access, or the account is not Copilot-enabled, GitHub will typically answer with `401`, `403`, or `404` and the adapter surfaces that response back to the caller.
 
-## Run the CLI
+## CLI Usage
 
-The CLI shares credentials with the GUI. Log in once via the app, then:
-
-```bash
-go run ./cmd/gastank usage github-copilot
-```
-
-## Run tests
+The binary includes a built-in CLI. Log in once via the GUI, then:
 
 ```bash
-go test ./...
+gastank usage                  # fetch Copilot usage (JSON)
+gastank usage github-copilot   # explicit provider name
+gastank --version              # print version
+gastank --help                 # show help
 ```
 
-## Live development
+## Development
+
+### Run tests
+
+```bash
+go test ./internal/...
+```
+
+### Live development
 
 ```bash
 task dev
 ```
 
-## Build
+### Build
 
 ```bash
 task build
 ```
 
-## Install
-
-Latest release installer:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/donnaknows/gastank/main/scripts/install.sh | bash
-```
-
-Release artifacts are published through GitHub Releases for macOS, Windows, and Linux.
-
-## Package (macOS .app)
+### Package (macOS .app)
 
 ```bash
 task package
