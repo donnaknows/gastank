@@ -113,8 +113,9 @@ tasks:
     deps:
       - task: build
     cmds:
-      # Create the Microsoft WebView2 bootstrapper if it doesn't exist
-      - wails3 generate webview2bootstrapper -dir "{{.ROOT_DIR}}/build/windows/installer"
+      # Download WebView2 bootstrapper into tmp/ where wails_tools.nsh expects it
+      - mkdir -p "{{.ROOT_DIR}}/build/windows/installer/tmp"
+      - wails3 generate webview2bootstrapper -dir "{{.ROOT_DIR}}/build/windows/installer/tmp"
       - | 
         {{if eq OS "windows"}}
         makensis {{if .VERSION}}-DINFO_PRODUCTVERSION="{{.VERSION}}"{{end}} -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}\{{.BIN_DIR}}\{{.APP_NAME}}.exe" project.nsi
