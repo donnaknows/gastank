@@ -61,16 +61,59 @@ gastank --help                 # show help
 
 ## Development
 
+### Prerequisites
+
+| Tool | Version | Install |
+|---|---|---|
+| Go | 1.25+ | [go.dev/dl](https://go.dev/dl/) |
+| Node.js | 20+ | [nodejs.org](https://nodejs.org/) |
+| Task | 3.x | [taskfile.dev/installation](https://taskfile.dev/installation/) |
+| Wails CLI | v3 alpha | `go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha.74` |
+
+**Platform-specific dependencies:**
+
+<details>
+<summary>macOS</summary>
+
+Xcode Command Line Tools (ships with most setups):
+```bash
+xcode-select --install
+```
+</details>
+
+<details>
+<summary>Linux (Ubuntu/Debian)</summary>
+
+```bash
+sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev
+```
+</details>
+
+<details>
+<summary>Windows</summary>
+
+- [MSYS2](https://www.msys2.org/) or [Git for Windows](https://gitforwindows.org/) (provides bash for scripts)
+- [NSIS](https://nsis.sourceforge.io/) (only needed for building the installer)
+  ```
+  choco install nsis
+  ```
+- WebView2 runtime (usually pre-installed on Windows 10/11)
+</details>
+
+### Quick start
+
+```bash
+# Install frontend dependencies
+cd frontend && npm install && cd ..
+
+# Run in dev mode (hot-reload)
+task dev
+```
+
 ### Run tests
 
 ```bash
 go test ./internal/...
-```
-
-### Live development
-
-```bash
-task dev
 ```
 
 ### Build
