@@ -1,5 +1,5 @@
 ---
-name: "design"
+name: "design-system"
 description: "gastank style guide for AI coding agents."
 metadata:
   author: typeui.sh
@@ -18,7 +18,7 @@ A simple tray/menu bar app to keep track of AI subscription usage
 ## Style Foundations
 - Visual style: extreme minimalism, pure dark mode, high information-to-ink ratio. Avoid cards, boxes, and heavy background fills at all costs.
 - Typography scale: 0.65rem/0.75rem/0.85rem/1rem/1.35rem | Fonts: primary=System UI (-apple-system, BlinkMacSystemFont, Segoe UI), mono=monospace | weights=400, 500, 600, bold
-- Color palette: Strict 3-color theme. Tokens: bg=#0a0a0a, fg=#f3f4f6, accent=#10b981 (emerald green), muted=#8a92a1. Use #141414 sparingly for faint surfaces. 
+- Color palette: Strict 3-color theme. Tokens: bg=#0a0a0a, fg=#f3f4f6, accent=#10b981 (emerald green), muted=#8a92a1. Use #141414 sparingly for faint surfaces.
 - Spacing scale: 4/6/8/12/16/20/24. Tight and deliberate spacing.
 
 ## Accessibility
