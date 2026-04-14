@@ -107,12 +107,17 @@ install_macos() {
   mv "$tmp_dir/gastank.app" /Applications/gastank.app
 
   # Create CLI symlink so `gastank` is available in PATH
-  local link_dir="/usr/local/bin"
+  local link_dir="$HOME/.local/bin"
   mkdir -p "$link_dir"
   ln -sf /Applications/gastank.app/Contents/MacOS/gastank "$link_dir/gastank"
 
   log_success "Installed /Applications/gastank.app"
   log_success "CLI linked at ${link_dir}/gastank"
+
+  if [[ ":$PATH:" != *":$link_dir:"* ]]; then
+    log_warning "$link_dir is not in your PATH"
+    printf 'Add this to your shell profile:\n  export PATH="$PATH:$link_dir"\n'
+  fi
 }
 
 install_linux() {
