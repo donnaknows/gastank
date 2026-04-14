@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.1](https://github.com/donnaknows/gastank/compare/v0.1.0...v0.1.1) (2026-04-14)
+
+
+### Bug Fixes
+
+* clean up temp dirs safely in install script ([90b5c41](https://github.com/donnaknows/gastank/commit/90b5c419890bcb92568a84f083069a3a0da4c3a4))
+* **mac:** remove xattr warning from install script ([be823ca](https://github.com/donnaknows/gastank/commit/be823cad446da2758f61070ef3784fb61d832b54))
+* **mac:** replace template Info.plist with concrete values ([67b9863](https://github.com/donnaknows/gastank/commit/67b98639db2bed5000d2bdfde309f698d18e36a3))
+
 ## 0.1.0 (2026-04-14)
 
 
