@@ -9,6 +9,17 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 REPO="donnaknows/gastank"
+TMP_DIRS=()
+
+cleanup_tmp_dirs() {
+  local dir
+
+  for dir in "${TMP_DIRS[@]}"; do
+    [ -n "$dir" ] && rm -rf "$dir"
+  done
+}
+
+trap cleanup_tmp_dirs EXIT
 
 log_info() {
   printf "%b==>%b %s\n" "$BLUE" "$NC" "$1"
@@ -78,7 +89,7 @@ install_macos() {
   require_cmd unzip
 
   tmp_dir=$(mktemp -d)
-  trap 'rm -rf "$tmp_dir"' EXIT
+  TMP_DIRS+=("$tmp_dir")
   archive="gastank-macos-universal.zip"
   url="https://github.com/${REPO}/releases/download/${version}/${archive}"
 
@@ -104,7 +115,7 @@ install_linux() {
   local tmp_dir appimage_url archive_name target
 
   tmp_dir=$(mktemp -d)
-  trap 'rm -rf "$tmp_dir"' EXIT
+  TMP_DIRS+=("$tmp_dir")
 
   log_info "Resolving AppImage from GitHub API for ${version}"
 
